@@ -1,0 +1,3 @@
+# Restrict server-panel user to a single privileged helper binary.
+Defaults:server-panel !requiretty
+server-panel ALL=(root) NOPASSWD: /usr/local/sbin/server-panel-helper

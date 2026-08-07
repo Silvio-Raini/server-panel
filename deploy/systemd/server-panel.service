@@ -1,0 +1,27 @@
+[Unit]
+Description=CodigoWorks Server Panel
+After=network.target
+
+[Service]
+Type=simple
+User=server-panel
+Group=server-panel
+WorkingDirectory=/opt/server-panel
+EnvironmentFile=/etc/server-panel/.env
+ExecStart=/usr/bin/node /opt/server-panel/backend/dist/index.js
+Restart=on-failure
+RestartSec=3
+NoNewPrivileges=false
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/opt/server-panel/data /var/log/server-panel
+PrivateTmp=true
+CapabilityBoundingSet=
+LockPersonality=true
+MemoryDenyWriteExecute=false
+RestrictRealtime=true
+SystemCallArchitectures=native
+LimitNOFILE=65535
+
+[Install]
+WantedBy=multi-user.target

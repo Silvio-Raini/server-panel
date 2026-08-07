@@ -1,0 +1,23 @@
+{
+  "name": "server-panel",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Webbasiertes Server-Management-Panel für Debian 13",
+  "scripts": {
+    "dev": "concurrently \"npm run dev -w backend\" \"npm run dev -w frontend\"",
+    "build": "npm run build -w backend && npm run build -w frontend",
+    "start": "npm run start -w backend",
+    "test": "npm run test -w backend",
+    "lint": "npm run lint -w backend"
+  },
+  "workspaces": [
+    "backend",
+    "frontend"
+  ],
+  "engines": {
+    "node": ">=20"
+  },
+  "devDependencies": {
+    "concurrently": "^9.1.2"
+  }
+}
