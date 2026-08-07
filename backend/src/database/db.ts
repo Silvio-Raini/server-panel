@@ -85,10 +85,28 @@ export async function initDatabase(): Promise<Database.Database> {
       created_at TEXT NOT NULL DEFAULT (datetime('now'))
     );
 
+    CREATE TABLE IF NOT EXISTS domains (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      domain TEXT NOT NULL UNIQUE COLLATE NOCASE,
+      type TEXT NOT NULL CHECK(type IN ('static','proxy','redirect')),
+      target TEXT NOT NULL,
+      aliases_json TEXT NOT NULL DEFAULT '[]',
+      enabled INTEGER NOT NULL DEFAULT 1,
+      ssl_enabled INTEGER NOT NULL DEFAULT 0,
+      ssl_status TEXT NOT NULL DEFAULT 'none',
+      ssl_error TEXT,
+      auto_ssl INTEGER NOT NULL DEFAULT 1,
+      created_at TEXT NOT NULL DEFAULT (datetime('now')),
+      updated_at TEXT NOT NULL DEFAULT (datetime('now')),
+      notes TEXT,
+      nginx_config TEXT
+    );
+
     CREATE INDEX IF NOT EXISTS idx_sessions_user ON sessions(user_id);
     CREATE INDEX IF NOT EXISTS idx_sessions_expires ON sessions(expires_at);
     CREATE INDEX IF NOT EXISTS idx_audit_created ON audit_log(created_at DESC);
     CREATE INDEX IF NOT EXISTS idx_login_attempts_ip ON login_attempts(ip, created_at);
+    CREATE INDEX IF NOT EXISTS idx_domains_domain ON domains(domain);
   `);
 
   await bootstrapAdmin();

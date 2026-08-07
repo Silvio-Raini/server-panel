@@ -5,6 +5,7 @@ const links = [
   { to: '/', label: 'Dashboard', end: true },
   { section: 'System' },
   { to: '/services', label: 'Services' },
+  { to: '/domains', label: 'Domains' },
   { to: '/processes', label: 'Prozesse' },
   { to: '/logs', label: 'Logs' },
   { to: '/storage', label: 'Speicher' },

@@ -105,11 +105,21 @@ export type HelperAction =
   | { action: 'user.addGroup' | 'user.removeGroup'; username: string; group: string }
   | { action: 'group.create'; name: string }
   | { action: 'group.delete'; name: string }
-  | { action: 'process.signal'; pid: number; signal: 'TERM' | 'KILL' };
+  | { action: 'process.signal'; pid: number; signal: 'TERM' | 'KILL' }
+  | {
+      action: 'domain.apply';
+      domain: string;
+      type: 'static' | 'proxy' | 'redirect';
+      target: string;
+      aliases?: string[];
+      enabled?: boolean;
+    }
+  | { action: 'domain.remove'; domain: string; deleteCert?: boolean }
+  | { action: 'domain.certbot'; domain: string; aliases?: string[]; email?: string };
 
 /** Privileged operations via fixed helper binary + sudo (no shell). */
-export async function runHelper(payload: HelperAction): Promise<unknown> {
-  const result = await run('sudo', ['-n', env.HELPER_PATH, JSON.stringify(payload)], 60_000);
+export async function runHelper(payload: HelperAction, timeoutMs = 60_000): Promise<unknown> {
+  const result = await run('sudo', ['-n', env.HELPER_PATH, JSON.stringify(payload)], timeoutMs);
   if (result.code !== 0) {
     let message = 'Privilegierte Operation fehlgeschlagen.';
     try {

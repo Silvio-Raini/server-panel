@@ -12,6 +12,7 @@ import { StoragePage } from './pages/StoragePage';
 import { NetworkPage } from './pages/NetworkPage';
 import { AuditPage } from './pages/AuditPage';
 import { SettingsPage } from './pages/SettingsPage';
+import { DomainsPage } from './pages/DomainsPage';
 
 function Protected({ children }: { children: React.ReactNode }) {
   const { user, loading } = useAuth();
@@ -34,6 +35,7 @@ export default function App() {
       >
         <Route index element={<DashboardPage />} />
         <Route path="services" element={<ServicesPage />} />
+        <Route path="domains" element={<DomainsPage />} />
         <Route path="processes" element={<ProcessesPage />} />
         <Route path="logs" element={<LogsPage />} />
         <Route path="storage" element={<StoragePage />} />

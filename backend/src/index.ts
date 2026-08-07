@@ -21,6 +21,7 @@ import { registerLogRoutes } from './api/logs.js';
 import { registerStorageRoutes } from './api/storage.js';
 import { registerNetworkRoutes } from './api/network.js';
 import { registerAuditRoutes } from './api/audit.js';
+import { registerDomainRoutes } from './api/domains.js';
 
 async function main(): Promise<void> {
   await initDatabase();
@@ -66,6 +67,7 @@ async function main(): Promise<void> {
   await registerLogRoutes(app);
   await registerStorageRoutes(app);
   await registerNetworkRoutes(app);
+  await registerDomainRoutes(app);
   await registerAuditRoutes(app);
 
   if (fs.existsSync(env.FRONTEND_DIST)) {

@@ -28,6 +28,7 @@ const schema = z.object({
   BOOTSTRAP_ADMIN_PASSWORD: z.string().min(8).default('ChangeMeNow!'),
   HELPER_PATH: z.string().default('/usr/local/sbin/server-panel-helper'),
   PUBLIC_URL: z.string().url().default('https://server.codigoworks.net'),
+  CERTBOT_EMAIL: z.string().email().default('admin@codigoworks.net'),
   LOGIN_RATE_LIMIT_MAX: z.coerce.number().int().positive().default(10),
   LOGIN_RATE_LIMIT_WINDOW_MS: z.coerce.number().int().positive().default(900_000),
   FRONTEND_DIST: z.string().default(path.join(rootDir, 'frontend', 'dist')),

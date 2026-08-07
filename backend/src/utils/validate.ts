@@ -116,3 +116,71 @@ export function assertNotProtectedGroup(name: string): void {
     throw new AppError('PROTECTED_GROUP', 'Diese Systemgruppe ist geschützt.', 403);
   }
 }
+
+const DOMAIN_RE =
+  /^(?=.{1,253}$)(?!-)[a-z0-9-]{1,63}(?<!-)(\.(?!-)[a-z0-9-]{1,63}(?<!-))+$/i;
+const ALLOWED_WEB_ROOTS = ['/var/www', '/opt/sites', '/srv/www'];
+
+export function assertDomainName(domain: string): string {
+  const normalized = domain.trim().toLowerCase();
+  if (!DOMAIN_RE.test(normalized) || normalized.includes('..') || normalized.includes('/')) {
+    throw new AppError('INVALID_DOMAIN', 'Ungültiger Domainname.', 400);
+  }
+  return normalized;
+}
+
+export function assertStaticRoot(rootPath: string): string {
+  const normalized = rootPath.replace(/\/+$/, '') || '/';
+  if (!normalized.startsWith('/') || normalized.includes('..') || normalized.includes('\0')) {
+    throw new AppError('INVALID_ROOT', 'Ungültiger Document-Root.', 400);
+  }
+  const allowed = ALLOWED_WEB_ROOTS.some(
+    (base) => normalized === base || normalized.startsWith(`${base}/`),
+  );
+  if (!allowed) {
+    throw new AppError(
+      'ROOT_NOT_ALLOWED',
+      `Document-Root muss unter ${ALLOWED_WEB_ROOTS.join(', ')} liegen.`,
+      400,
+    );
+  }
+  return normalized;
+}
+
+/** Accepts "8080", "127.0.0.1:8080" or "localhost:8080". */
+export function assertProxyTarget(target: string): string {
+  const trimmed = target.trim();
+  if (/^\d{1,5}$/.test(trimmed)) {
+    const port = Number(trimmed);
+    if (port < 1 || port > 65535 || port === 22) {
+      throw new AppError('INVALID_PROXY_TARGET', 'Ungültiger Port.', 400);
+    }
+    return `127.0.0.1:${port}`;
+  }
+  const m = trimmed.match(/^(127\.0\.0\.1|localhost):(\d{1,5})$/i);
+  if (!m) {
+    throw new AppError(
+      'INVALID_PROXY_TARGET',
+      'Proxy-Ziel muss localhost/127.0.0.1:PORT oder nur PORT sein.',
+      400,
+    );
+  }
+  const port = Number(m[2]);
+  if (port < 1 || port > 65535 || port === 22) {
+    throw new AppError('INVALID_PROXY_TARGET', 'Ungültiger Port.', 400);
+  }
+  return `127.0.0.1:${port}`;
+}
+
+export function assertRedirectTarget(url: string): string {
+  let parsed: URL;
+  try {
+    parsed = new URL(url);
+  } catch {
+    throw new AppError('INVALID_REDIRECT', 'Ungültige Redirect-URL.', 400);
+  }
+  if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') {
+    throw new AppError('INVALID_REDIRECT', 'Redirect muss http(s) verwenden.', 400);
+  }
+  return parsed.toString();
+}

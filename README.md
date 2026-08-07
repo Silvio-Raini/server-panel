@@ -148,6 +148,27 @@ chown server-panel:server-panel /opt/server-panel/data/panel.db
 systemctl start server-panel
 ```
 
+## Domains / SSL
+
+Unter **Domains** im Panel können Domains verbunden werden:
+
+| Typ | Ziel | Beispiel |
+|-----|------|----------|
+| `proxy` | lokaler Port / App | `8080` oder `127.0.0.1:3001` |
+| `static` | Document-Root | `/var/www/meine-seite` |
+| `redirect` | externe URL | `https://example.com` |
+
+Ablauf:
+
+1. nginx-VHost wird unter `/etc/nginx/sites-available/sp-<domain>.conf` erzeugt
+2. Site wird aktiviert, `nginx -t` + Reload
+3. optional sofort Certbot (`certbot --nginx`) für Let's Encrypt
+
+Erlaubte Document-Roots: `/var/www`, `/opt/sites`, `/srv/www`  
+Geschützt: `server.codigoworks.net` (Panel selbst)
+
+Vor SSL muss die Domain per DNS auf diesen Server zeigen. Kontaktmail: `CERTBOT_EMAIL`.
+
 ## API (Auszug)
 
 ```text
@@ -158,6 +179,13 @@ GET    /api/auth/me
 GET    /api/system
 GET    /api/services
 POST   /api/services/:name/restart
+
+GET    /api/domains
+POST   /api/domains
+PUT    /api/domains/:id
+DELETE /api/domains/:id
+POST   /api/domains/:id/ssl
+POST   /api/domains/:id/reapply
 
 GET    /api/users
 POST   /api/users
