@@ -115,7 +115,24 @@ export type HelperAction =
       enabled?: boolean;
     }
   | { action: 'domain.remove'; domain: string; deleteCert?: boolean }
-  | { action: 'domain.certbot'; domain: string; aliases?: string[]; email?: string };
+  | { action: 'domain.certbot'; domain: string; aliases?: string[]; email?: string }
+  | { action: 'sftp.ensureInfra' }
+  | {
+      action: 'sftp.create';
+      username: string;
+      password: string;
+      permission: 'rw' | 'ro';
+      home: string;
+    }
+  | {
+      action: 'sftp.setPermission';
+      username: string;
+      permission: 'rw' | 'ro';
+      home: string;
+    }
+  | { action: 'sftp.setPassword'; username: string; password: string }
+  | { action: 'sftp.lock' | 'sftp.unlock'; username: string }
+  | { action: 'sftp.delete'; username: string; home: string; removeData: boolean };
 
 /** Privileged operations via fixed helper binary + sudo (no shell). */
 export async function runHelper(payload: HelperAction, timeoutMs = 60_000): Promise<unknown> {

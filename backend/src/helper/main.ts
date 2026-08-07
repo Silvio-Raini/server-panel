@@ -164,6 +164,20 @@ function assertRedirectTarget(url: string): string {
   return parsed.toString();
 }
 
+function assertSftpUser(username: unknown): string {
+  if (typeof username !== 'string' || !USER_RE.test(username)) fail('Ungültiger Benutzername');
+  if (!/^sftp_[a-z0-9_]{1,27}$/.test(username)) fail('SFTP-Benutzer muss sftp_name entsprechen');
+  if (PROTECTED_USERS.has(username)) fail('Geschützter Benutzer');
+  return username;
+}
+
+function assertSftpHome(home: string, username: string): string {
+  const expected = path.join('/var/sftp', username);
+  const normalized = path.resolve(home);
+  if (normalized !== expected || normalized.includes('..')) fail('Ungültiges SFTP-Home');
+  return normalized;
+}
+
 async function main(): Promise<void> {
   if (process.getuid && process.getuid() !== 0) fail('Helper muss als root laufen', 2);
   const raw = process.argv[2];
@@ -481,6 +495,180 @@ ${locationBlock}
           fail((r.stderr || r.stdout).trim().slice(0, 800) || 'certbot fehlgeschlagen');
         }
         ok({ stdout: r.stdout.slice(0, 500) });
+      }
+      case 'sftp.ensureInfra': {
+        // Groups
+        for (const group of ['sftpusers', 'sftpreadonly']) {
+          const exists = await run('/usr/bin/getent', ['group', group]);
+          if (exists.code !== 0) {
+            const g = await run('/usr/sbin/groupadd', ['--system', group]);
+            if (g.code !== 0) fail(g.stderr.trim() || `groupadd ${group} fehlgeschlagen`);
+          }
+        }
+        fs.mkdirSync('/var/sftp', { recursive: true, mode: 0o755 });
+        fs.chownSync('/var/sftp', 0, 0);
+        fs.chmodSync('/var/sftp', 0o755);
+
+        const confPath = '/etc/ssh/sshd_config.d/60-server-panel-sftp.conf';
+        const conf = `# managed-by: server-panel
+# Chrooted SFTP-only accounts (no shell, no forwarding)
+Match Group sftpusers
+    ChrootDirectory /var/sftp/%u
+    ForceCommand internal-sftp
+    AllowTcpForwarding no
+    X11Forwarding no
+    AllowAgentForwarding no
+    PermitTunnel no
+    PermitTTY no
+    PasswordAuthentication yes
+
+# Read-only override for members of sftpreadonly
+Match Group sftpreadonly
+    ForceCommand internal-sftp -R
+`;
+        fs.writeFileSync(confPath, conf, { mode: 0o644 });
+        const test = await run('/usr/sbin/sshd', ['-t']);
+        if (test.code !== 0) fail(test.stderr.trim() || 'sshd -t fehlgeschlagen');
+        const reload = await run('/usr/bin/systemctl', ['reload', 'ssh']);
+        if (reload.code !== 0) fail(reload.stderr.trim() || 'ssh reload fehlgeschlagen');
+        ok({ confPath });
+      }
+      case 'sftp.create': {
+        const username = assertSftpUser(payload.username);
+        const password = String(payload.password || '');
+        if (password.length < 10) fail('Passwort zu kurz');
+        const permission = String(payload.permission || 'rw');
+        if (permission !== 'rw' && permission !== 'ro') fail('Ungültige Berechtigung');
+        const home = assertSftpHome(String(payload.home || ''), username);
+
+        // Refuse if system user already exists
+        const existing = await run('/usr/bin/id', ['-u', username]);
+        if (existing.code === 0) fail('Benutzer existiert bereits im System');
+
+        fs.mkdirSync(home, { recursive: true, mode: 0o755 });
+        fs.chownSync(home, 0, 0);
+        fs.chmodSync(home, 0o755);
+
+        const dataDir = path.join(home, 'data');
+        fs.mkdirSync(dataDir, { recursive: true, mode: 0o755 });
+
+        const create = await run('/usr/sbin/useradd', [
+          '--system',
+          '--home-dir',
+          home,
+          '--no-create-home',
+          '--shell',
+          '/usr/sbin/nologin',
+          '--gid',
+          'sftpusers',
+          '--groups',
+          permission === 'ro' ? 'sftpusers,sftpreadonly' : 'sftpusers',
+          username,
+        ]);
+        if (create.code !== 0) fail(create.stderr.trim() || 'useradd fehlgeschlagen');
+
+        const uidRes = await run('/usr/bin/id', ['-u', username]);
+        const gidRes = await run('/usr/bin/id', ['-g', username]);
+        const uid = Number(uidRes.stdout.trim());
+        const gid = Number(gidRes.stdout.trim());
+        if (!Number.isInteger(uid) || !Number.isInteger(gid)) fail('UID/GID konnte nicht ermittelt werden');
+
+        if (permission === 'ro') {
+          fs.chownSync(dataDir, 0, 0);
+          fs.chmodSync(dataDir, 0o555);
+        } else {
+          fs.chownSync(dataDir, uid, gid);
+          fs.chmodSync(dataDir, 0o750);
+        }
+
+        const pass = await run('/usr/sbin/chpasswd', [], `${username}:${password}\n`);
+        if (pass.code !== 0) fail('Passwort setzen fehlgeschlagen');
+
+        // Ensure account is unlocked/expired appropriately
+        await run('/usr/sbin/usermod', ['--unlock', username]);
+        ok({ home, dataDir, permission });
+      }
+      case 'sftp.setPermission': {
+        const username = assertSftpUser(payload.username);
+        const permission = String(payload.permission || '');
+        if (permission !== 'rw' && permission !== 'ro') fail('Ungültige Berechtigung');
+        const home = assertSftpHome(String(payload.home || ''), username);
+        const dataDir = path.join(home, 'data');
+
+        const uidRes = await run('/usr/bin/id', ['-u', username]);
+        const gidRes = await run('/usr/bin/id', ['-g', username]);
+        if (uidRes.code !== 0) fail('Benutzer nicht gefunden');
+        const uid = Number(uidRes.stdout.trim());
+        const gid = Number(gidRes.stdout.trim());
+
+        if (permission === 'ro') {
+          await run('/usr/sbin/usermod', ['-aG', 'sftpreadonly', username]);
+          fs.chownSync(dataDir, 0, 0);
+          fs.chmodSync(dataDir, 0o555);
+        } else {
+          // remove from readonly group (ignore if not a member)
+          await run('/usr/bin/gpasswd', ['-d', username, 'sftpreadonly']);
+          fs.chownSync(dataDir, uid, gid);
+          fs.chmodSync(dataDir, 0o750);
+        }
+        ok({ permission });
+      }
+      case 'sftp.setPassword': {
+        const username = assertSftpUser(payload.username);
+        const password = String(payload.password || '');
+        if (password.length < 10) fail('Passwort zu kurz');
+        // Ensure this is an sftp user
+        const groups = await run('/usr/bin/id', ['-nG', username]);
+        if (groups.code !== 0 || !groups.stdout.split(/\s+/).includes('sftpusers')) {
+          fail('Kein SFTP-Account');
+        }
+        const pass = await run('/usr/sbin/chpasswd', [], `${username}:${password}\n`);
+        if (pass.code !== 0) fail('Passwort setzen fehlgeschlagen');
+        ok();
+      }
+      case 'sftp.lock': {
+        const username = assertSftpUser(payload.username);
+        const groups = await run('/usr/bin/id', ['-nG', username]);
+        if (groups.code !== 0 || !groups.stdout.split(/\s+/).includes('sftpusers')) {
+          fail('Kein SFTP-Account');
+        }
+        const r = await run('/usr/sbin/usermod', ['--lock', username]);
+        if (r.code !== 0) fail(r.stderr.trim() || 'Sperren fehlgeschlagen');
+        ok();
+      }
+      case 'sftp.unlock': {
+        const username = assertSftpUser(payload.username);
+        const groups = await run('/usr/bin/id', ['-nG', username]);
+        if (groups.code !== 0 || !groups.stdout.split(/\s+/).includes('sftpusers')) {
+          fail('Kein SFTP-Account');
+        }
+        const r = await run('/usr/sbin/usermod', ['--unlock', username]);
+        if (r.code !== 0) fail(r.stderr.trim() || 'Entsperren fehlgeschlagen');
+        ok();
+      }
+      case 'sftp.delete': {
+        const username = assertSftpUser(payload.username);
+        const home = assertSftpHome(String(payload.home || ''), username);
+        const groups = await run('/usr/bin/id', ['-nG', username]);
+        if (groups.code !== 0 || !groups.stdout.split(/\s+/).includes('sftpusers')) {
+          fail('Kein SFTP-Account');
+        }
+        // Terminate active SFTP/SSH sessions for this user (no shell wildcards)
+        await run('/usr/bin/pkill', ['-KILL', '-u', username]);
+        // brief settle; userdel may still race otherwise
+        await new Promise((r) => setTimeout(r, 300));
+        let del = await run('/usr/sbin/userdel', [username]);
+        if (del.code !== 0) {
+          await run('/usr/bin/pkill', ['-KILL', '-u', username]);
+          await new Promise((r) => setTimeout(r, 300));
+          del = await run('/usr/sbin/userdel', [username]);
+        }
+        if (del.code !== 0) fail(del.stderr.trim() || 'userdel fehlgeschlagen');
+        if (payload.removeData) {
+          // Only delete under /var/sftp/<user>
+          fs.rmSync(home, { recursive: true, force: true });
+        }
+        ok();
       }
       default:
         fail('Unbekannte Aktion');

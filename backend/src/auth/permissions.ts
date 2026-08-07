@@ -16,6 +16,8 @@ export type Permission =
   | 'network.read'
   | 'domains.read'
   | 'domains.manage'
+  | 'sftp.read'
+  | 'sftp.manage'
   | 'audit.read'
   | 'settings.manage';
 
@@ -35,6 +37,8 @@ const ROLE_PERMISSIONS: Record<Role, Permission[]> = {
     'network.read',
     'domains.read',
     'domains.manage',
+    'sftp.read',
+    'sftp.manage',
     'audit.read',
     'settings.manage',
   ],
@@ -48,6 +52,7 @@ const ROLE_PERMISSIONS: Record<Role, Permission[]> = {
     'storage.read',
     'network.read',
     'domains.read',
+    'sftp.read',
     'audit.read',
   ],
 };

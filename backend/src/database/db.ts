@@ -102,11 +102,23 @@ export async function initDatabase(): Promise<Database.Database> {
       nginx_config TEXT
     );
 
+    CREATE TABLE IF NOT EXISTS sftp_accounts (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      username TEXT NOT NULL UNIQUE COLLATE NOCASE,
+      permission TEXT NOT NULL CHECK(permission IN ('rw','ro')),
+      home TEXT NOT NULL,
+      enabled INTEGER NOT NULL DEFAULT 1,
+      notes TEXT,
+      created_at TEXT NOT NULL DEFAULT (datetime('now')),
+      updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+    );
+
     CREATE INDEX IF NOT EXISTS idx_sessions_user ON sessions(user_id);
     CREATE INDEX IF NOT EXISTS idx_sessions_expires ON sessions(expires_at);
     CREATE INDEX IF NOT EXISTS idx_audit_created ON audit_log(created_at DESC);
     CREATE INDEX IF NOT EXISTS idx_login_attempts_ip ON login_attempts(ip, created_at);
     CREATE INDEX IF NOT EXISTS idx_domains_domain ON domains(domain);
+    CREATE INDEX IF NOT EXISTS idx_sftp_username ON sftp_accounts(username);
   `);
 
   await bootstrapAdmin();

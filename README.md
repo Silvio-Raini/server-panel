@@ -148,6 +148,19 @@ chown server-panel:server-panel /opt/server-panel/data/panel.db
 systemctl start server-panel
 ```
 
+## SFTP-Accounts
+
+Unter **SFTP** im Panel:
+
+- dynamische Accounts (`sftp_name`)
+- Chroot unter `/var/sftp/<user>`
+- schreibbares Verzeichnis: `/data` (im Chroot)
+- Berechtigungen: **RW** oder **RO** (`internal-sftp -R`)
+- kein Shell-Login (`nologin`), kein Forwarding
+- sperren/entsperren, Passwort setzen, löschen inkl. optionaler Datenlöschung
+
+sshd Drop-in: `/etc/ssh/sshd_config.d/60-server-panel-sftp.conf`
+
 ## Domains / SSL
 
 Unter **Domains** im Panel können Domains verbunden werden:

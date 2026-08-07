@@ -13,6 +13,7 @@ const links = [
   { section: 'Benutzer' },
   { to: '/users', label: 'Benutzer' },
   { to: '/groups', label: 'Gruppen' },
+  { to: '/sftp', label: 'SFTP' },
   { section: 'Sicherheit' },
   { to: '/audit', label: 'Audit Log' },
   { to: '/settings', label: 'Einstellungen' },
