@@ -148,6 +148,16 @@ chown server-panel:server-panel /opt/server-panel/data/panel.db
 systemctl start server-panel
 ```
 
+## File Viewer
+
+Unter **Files** im Panel (nur Lesen):
+
+- erlaubte Wurzeln: `/var/www`, `/opt/sites`, `/srv/www`, `/var/sftp`, `/var/log`
+- Ordner browsen, Textdateien/Logs ansehen, Bilder als Vorschau
+- Schutz vor Path Traversal und Symlink-Escape
+- sensible Dateien (`.env`, Keys, `panel.db`, …) blockiert
+- kein Schreiben/Löschen über den Viewer
+
 ## SFTP-Accounts
 
 Unter **SFTP** im Panel:

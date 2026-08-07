@@ -23,6 +23,7 @@ import { registerNetworkRoutes } from './api/network.js';
 import { registerAuditRoutes } from './api/audit.js';
 import { registerDomainRoutes } from './api/domains.js';
 import { registerSftpRoutes } from './api/sftp.js';
+import { registerFileRoutes } from './api/files.js';
 
 async function main(): Promise<void> {
   await initDatabase();
@@ -70,6 +71,7 @@ async function main(): Promise<void> {
   await registerNetworkRoutes(app);
   await registerDomainRoutes(app);
   await registerSftpRoutes(app);
+  await registerFileRoutes(app);
   await registerAuditRoutes(app);
 
   if (fs.existsSync(env.FRONTEND_DIST)) {

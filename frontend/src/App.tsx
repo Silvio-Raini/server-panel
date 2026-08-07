@@ -14,6 +14,7 @@ import { AuditPage } from './pages/AuditPage';
 import { SettingsPage } from './pages/SettingsPage';
 import { DomainsPage } from './pages/DomainsPage';
 import { SftpPage } from './pages/SftpPage';
+import { FilesPage } from './pages/FilesPage';
 
 function Protected({ children }: { children: React.ReactNode }) {
   const { user, loading } = useAuth();
@@ -40,6 +41,7 @@ export default function App() {
         <Route path="processes" element={<ProcessesPage />} />
         <Route path="logs" element={<LogsPage />} />
         <Route path="storage" element={<StoragePage />} />
+        <Route path="files" element={<FilesPage />} />
         <Route path="network" element={<NetworkPage />} />
         <Route path="users" element={<UsersPage />} />
         <Route path="groups" element={<GroupsPage />} />

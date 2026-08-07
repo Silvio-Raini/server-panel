@@ -178,6 +178,85 @@ function assertSftpHome(home: string, username: string): string {
   return normalized;
 }
 
+const FILE_VIEWER_ROOTS = ['/var/www', '/opt/sites', '/srv/www', '/var/sftp', '/var/log'];
+const BLOCKED_FILE_RE =
+  /(\.env($|\.)|^\.git$|id_rsa|id_ed25519|privkey\.pem|panel\.db|\.sqlite($|\-)|htpasswd|^shadow$)/i;
+
+function assertViewerPath(input: unknown): string {
+  if (typeof input !== 'string' || !input.startsWith('/') || input.includes('\0')) {
+    fail('Ungültiger Pfad');
+  }
+  const resolved = path.resolve(input);
+  const allowed = FILE_VIEWER_ROOTS.some(
+    (root) => resolved === root || resolved.startsWith(`${root}/`),
+  );
+  if (!allowed) fail('Pfad nicht erlaubt');
+  if (resolved.split(path.sep).includes('..')) fail('Pfadtraversal');
+  const base = path.basename(resolved);
+  if (base && BLOCKED_FILE_RE.test(base)) fail('Datei gesperrt');
+
+  // Ensure realpath stays inside allowed roots (blocks symlink escape)
+  let real = resolved;
+  try {
+    if (fs.existsSync(resolved)) {
+      real = fs.realpathSync(resolved);
+    }
+  } catch {
+    fail('Pfad nicht lesbar');
+  }
+  const realAllowed = FILE_VIEWER_ROOTS.some(
+    (root) => real === root || real.startsWith(`${root}/`),
+  );
+  if (!realAllowed) fail('Symlink-Ziel außerhalb erlaubter Wurzeln');
+  return resolved;
+}
+
+function detectMime(filePath: string, buf?: Buffer): string {
+  const ext = path.extname(filePath).toLowerCase();
+  const map: Record<string, string> = {
+    '.txt': 'text/plain',
+    '.md': 'text/markdown',
+    '.log': 'text/plain',
+    '.json': 'application/json',
+    '.js': 'text/javascript',
+    '.ts': 'text/typescript',
+    '.css': 'text/css',
+    '.html': 'text/html',
+    '.htm': 'text/html',
+    '.xml': 'text/xml',
+    '.yml': 'text/yaml',
+    '.yaml': 'text/yaml',
+    '.conf': 'text/plain',
+    '.ini': 'text/plain',
+    '.sh': 'text/x-shellscript',
+    '.py': 'text/x-python',
+    '.php': 'text/x-php',
+    '.svg': 'image/svg+xml',
+    '.png': 'image/png',
+    '.jpg': 'image/jpeg',
+    '.jpeg': 'image/jpeg',
+    '.gif': 'image/gif',
+    '.webp': 'image/webp',
+    '.pdf': 'application/pdf',
+  };
+  if (map[ext]) return map[ext];
+  if (buf && buf.includes(0)) return 'application/octet-stream';
+  return 'text/plain';
+}
+
+function isMostlyText(buf: Buffer): boolean {
+  if (!buf.length) return true;
+  let suspicious = 0;
+  const sample = buf.subarray(0, Math.min(buf.length, 4096));
+  for (const byte of sample) {
+    if (byte === 0) return false;
+    if (byte < 7 || (byte > 14 && byte < 32 && byte !== 9 && byte !== 10 && byte !== 13)) {
+      suspicious++;
+    }
+  }
+  return suspicious / sample.length < 0.3;
+}
+
 async function main(): Promise<void> {
   if (process.getuid && process.getuid() !== 0) fail('Helper muss als root laufen', 2);
   const raw = process.argv[2];
@@ -669,6 +748,111 @@ Match Group sftpreadonly
           fs.rmSync(home, { recursive: true, force: true });
         }
         ok();
+      }
+      case 'files.list': {
+        const target = assertViewerPath(payload.path);
+        let st: fs.Stats;
+        try {
+          st = fs.statSync(target);
+        } catch {
+          fail('Pfad nicht gefunden');
+        }
+        if (!st.isDirectory()) fail('Kein Verzeichnis');
+
+        const names = fs.readdirSync(target).slice(0, 500);
+        const entries = [];
+        for (const name of names) {
+          if (name === '.' || name === '..' || BLOCKED_FILE_RE.test(name)) continue;
+          const full = path.join(target, name);
+          try {
+            const lst = fs.lstatSync(full);
+            let type: 'file' | 'dir' | 'symlink' | 'other' = 'other';
+            if (lst.isSymbolicLink()) type = 'symlink';
+            else if (lst.isDirectory()) type = 'dir';
+            else if (lst.isFile()) type = 'file';
+            entries.push({
+              name,
+              path: full,
+              type,
+              size: lst.isFile() ? lst.size : 0,
+              mtime: lst.mtime.toISOString(),
+              mode: (lst.mode & 0o777).toString(8).padStart(3, '0'),
+              readable: true,
+            });
+          } catch {
+            entries.push({
+              name,
+              path: full,
+              type: 'other',
+              size: 0,
+              mtime: null,
+              mode: '000',
+              readable: false,
+            });
+          }
+        }
+
+        const parent = path.dirname(target);
+        const parentAllowed = FILE_VIEWER_ROOTS.some(
+          (root) => parent === root || parent.startsWith(`${root}/`) || FILE_VIEWER_ROOTS.includes(parent),
+        );
+        ok({
+          path: target,
+          parent: FILE_VIEWER_ROOTS.includes(target) ? null : parentAllowed ? parent : null,
+          entries,
+        });
+      }
+      case 'files.read': {
+        const target = assertViewerPath(payload.path);
+        let st: fs.Stats;
+        try {
+          st = fs.statSync(target);
+        } catch {
+          fail('Datei nicht gefunden');
+        }
+        if (!st.isFile()) fail('Kein reguläres File');
+
+        const maxBytes = Math.min(Math.max(Number(payload.maxBytes) || 512_000, 1), 1_048_576);
+        const fd = fs.openSync(target, 'r');
+        try {
+          const toRead = Math.min(st.size, maxBytes);
+          const buf = Buffer.alloc(toRead);
+          fs.readSync(fd, buf, 0, toRead, 0);
+          const mime = detectMime(target, buf);
+          const isImage = mime.startsWith('image/') && mime !== 'image/svg+xml';
+          const isSvg = mime === 'image/svg+xml';
+          const textLike = mime.startsWith('text/') || ['application/json', 'application/xml'].includes(mime) || isSvg;
+          const isText = textLike && isMostlyText(buf);
+
+          let encoding: 'utf-8' | 'base64' | 'none' = 'none';
+          let content: string | null = null;
+          if (isImage) {
+            // only small images inline
+            if (st.size <= 1_048_576) {
+              const full = st.size <= maxBytes ? buf : fs.readFileSync(target);
+              encoding = 'base64';
+              content = full.toString('base64');
+            }
+          } else if (isText) {
+            encoding = 'utf-8';
+            content = buf.toString('utf8');
+          }
+
+          ok({
+            path: target,
+            name: path.basename(target),
+            size: st.size,
+            mtime: st.mtime.toISOString(),
+            encoding,
+            mime,
+            truncated: st.size > toRead,
+            content,
+            isText,
+            isImage: isImage || isSvg,
+          });
+        } finally {
+          fs.closeSync(fd);
+        }
       }
       default:
         fail('Unbekannte Aktion');

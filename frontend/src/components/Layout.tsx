@@ -9,6 +9,7 @@ const links = [
   { to: '/processes', label: 'Prozesse' },
   { to: '/logs', label: 'Logs' },
   { to: '/storage', label: 'Speicher' },
+  { to: '/files', label: 'Files' },
   { to: '/network', label: 'Netzwerk' },
   { section: 'Benutzer' },
   { to: '/users', label: 'Benutzer' },

@@ -132,7 +132,9 @@ export type HelperAction =
     }
   | { action: 'sftp.setPassword'; username: string; password: string }
   | { action: 'sftp.lock' | 'sftp.unlock'; username: string }
-  | { action: 'sftp.delete'; username: string; home: string; removeData: boolean };
+  | { action: 'sftp.delete'; username: string; home: string; removeData: boolean }
+  | { action: 'files.list'; path: string }
+  | { action: 'files.read'; path: string; maxBytes?: number };
 
 /** Privileged operations via fixed helper binary + sudo (no shell). */
 export async function runHelper(payload: HelperAction, timeoutMs = 60_000): Promise<unknown> {
