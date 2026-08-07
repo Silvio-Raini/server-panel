@@ -1,5 +1,6 @@
 import { useEffect, useState, type FormEvent } from 'react';
 import { ConfirmDialog } from '../components/ConfirmDialog';
+import { DirPicker } from '../components/DirPicker';
 import { useToast } from '../components/Toast';
 import { api } from '../lib/api';
 import { useAuth } from '../lib/auth';
@@ -45,6 +46,7 @@ export function DomainsPage() {
   const [busy, setBusy] = useState(false);
   const [confirmDelete, setConfirmDelete] = useState<Domain | null>(null);
   const [deleteCert, setDeleteCert] = useState(false);
+  const [pickerOpen, setPickerOpen] = useState(false);
 
   const load = async () => {
     const data = await api<DomainsResponse>('/api/domains');
@@ -158,13 +160,33 @@ export function DomainsPage() {
               </div>
               <div className="field" style={{ margin: 0 }}>
                 <label className="label">Ziel</label>
-                <input
-                  className="input"
-                  placeholder={targetHint(form.type)}
-                  value={form.target}
-                  onChange={(e) => setForm({ ...form, target: e.target.value })}
-                  required
-                />
+                {form.type === 'static' ? (
+                  <div className="dir-picker-field">
+                    <input
+                      className="input"
+                      placeholder={targetHint(form.type)}
+                      value={form.target}
+                      onChange={(e) => setForm({ ...form, target: e.target.value })}
+                      required
+                    />
+                    <button
+                      type="button"
+                      className="btn"
+                      onClick={() => setPickerOpen(true)}
+                      title="Ordner im Tree auswählen"
+                    >
+                      Ordner wählen
+                    </button>
+                  </div>
+                ) : (
+                  <input
+                    className="input"
+                    placeholder={targetHint(form.type)}
+                    value={form.target}
+                    onChange={(e) => setForm({ ...form, target: e.target.value })}
+                    required
+                  />
+                )}
               </div>
               <div className="field" style={{ margin: 0 }}>
                 <label className="label">Aliases (optional, kommagetrennt)</label>
@@ -353,6 +375,15 @@ export function DomainsPage() {
           Let&apos;s-Encrypt-Zertifikat löschen
         </label>
       )}
+
+      <DirPicker
+        open={pickerOpen}
+        roots={roots}
+        value={form.target || roots[0] || '/var/www'}
+        title="Document-Root auswählen"
+        onClose={() => setPickerOpen(false)}
+        onSelect={(path) => setForm((prev) => ({ ...prev, target: path }))}
+      />
     </>
   );
 }

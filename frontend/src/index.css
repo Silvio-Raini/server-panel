@@ -288,6 +288,80 @@ tr:hover td { background: rgba(255,255,255,0.02); }
 }
 .error-box { color: #fda4af; }
 
+.dir-picker-field {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  gap: 0.5rem;
+}
+.dir-picker-modal {
+  width: min(720px, 100%);
+  max-height: min(85vh, 820px);
+  display: flex;
+  flex-direction: column;
+}
+.dir-picker-selected {
+  margin: 0 0 0.75rem;
+  padding: 0.65rem 0.8rem;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: #0d1524;
+  color: var(--muted);
+}
+.dir-picker-selected strong {
+  color: var(--text);
+  font-weight: 600;
+}
+.dir-tree {
+  flex: 1;
+  min-height: 280px;
+  max-height: 45vh;
+  overflow: auto;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  background: #070d18;
+  padding: 0.4rem 0;
+  margin-bottom: 1rem;
+}
+.dir-tree-row {
+  display: flex;
+  align-items: center;
+  gap: 0.2rem;
+  min-height: 2rem;
+}
+.dir-tree-row.selected {
+  background: rgba(61, 155, 253, 0.14);
+}
+.dir-tree-toggle,
+.dir-tree-label {
+  border: none;
+  background: transparent;
+  color: inherit;
+  cursor: pointer;
+  text-align: left;
+}
+.dir-tree-toggle {
+  width: 1.6rem;
+  flex: 0 0 1.6rem;
+  color: var(--muted);
+}
+.dir-tree-label {
+  flex: 1;
+  padding: 0.3rem 0.4rem;
+  border-radius: 8px;
+}
+.dir-tree-label:hover {
+  background: rgba(255, 255, 255, 0.04);
+}
+.dir-tree-icon {
+  color: var(--muted);
+  margin-right: 0.25rem;
+}
+.dir-tree-empty {
+  color: var(--muted);
+  font-size: 0.82rem;
+  padding: 0.2rem 0 0.45rem;
+}
+
 @media (max-width: 960px) {
   .app-shell { grid-template-columns: 1fr; }
   .sidebar {
