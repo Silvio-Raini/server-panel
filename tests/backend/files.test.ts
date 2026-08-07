@@ -1,25 +1,40 @@
 import { describe, expect, it } from 'vitest';
-import { assertViewerPath } from '../../backend/src/services/files/viewer.js';
+import {
+  assertDeletablePath,
+  assertFsPath,
+  assertWritablePath,
+} from '../../backend/src/services/files/viewer.js';
 import { AppError } from '../../backend/src/utils/errors.js';
 import { roleHas } from '../../backend/src/auth/permissions.js';
 
-describe('file viewer security', () => {
-  it('allows only configured roots', () => {
-    expect(assertViewerPath('/var/www')).toBe('/var/www');
-    expect(assertViewerPath('/var/www/site/index.html')).toBe('/var/www/site/index.html');
-    expect(assertViewerPath('/var/sftp/sftp_demo/data')).toBe('/var/sftp/sftp_demo/data');
+describe('file manager security', () => {
+  it('allows full filesystem browse paths from /', () => {
+    expect(assertFsPath('/')).toBe('/');
+    expect(assertFsPath('/etc/nginx/nginx.conf')).toBe('/etc/nginx/nginx.conf');
+    expect(assertFsPath('/var/www/../www/index.html')).toBe('/var/www/index.html');
   });
 
-  it('blocks path traversal and sensitive files', () => {
-    expect(() => assertViewerPath('/etc/passwd')).toThrow(AppError);
-    expect(() => assertViewerPath('/var/www/../etc/passwd')).toThrow(AppError);
-    expect(() => assertViewerPath('/var/www/../../root/.ssh/id_rsa')).toThrow(AppError);
-    expect(() => assertViewerPath('/var/www/.env')).toThrow(AppError);
-    expect(() => assertViewerPath('/var/www/secret.panel.db')).toThrow(AppError);
+  it('blocks traversal tricks', () => {
+    expect(() => assertFsPath('etc/passwd')).toThrow(AppError);
+    expect(() => assertFsPath('/tmp/\0x')).toThrow(AppError);
   });
 
-  it('grants read permission to admin and readonly', () => {
-    expect(roleHas('admin', 'files.read')).toBe(true);
+  it('blocks writes to virtual filesystems', () => {
+    expect(() => assertWritablePath('/proc/self/status')).toThrow(AppError);
+    expect(() => assertWritablePath('/sys/class')).toThrow(AppError);
+    expect(assertWritablePath('/var/www/test.txt')).toBe('/var/www/test.txt');
+  });
+
+  it('protects critical mountpoints from deletion', () => {
+    expect(() => assertDeletablePath('/')).toThrow(AppError);
+    expect(() => assertDeletablePath('/etc')).toThrow(AppError);
+    expect(() => assertDeletablePath('/var')).toThrow(AppError);
+    expect(assertDeletablePath('/var/www/old-site')).toBe('/var/www/old-site');
+  });
+
+  it('separates read and manage permissions', () => {
+    expect(roleHas('admin', 'files.manage')).toBe(true);
     expect(roleHas('readonly', 'files.read')).toBe(true);
+    expect(roleHas('readonly', 'files.manage')).toBe(false);
   });
 });

@@ -362,6 +362,16 @@ tr:hover td { background: rgba(255,255,255,0.02); }
   padding: 0.2rem 0 0.45rem;
 }
 
+.file-editor {
+  min-height: 55vh;
+  font-family: 'IBM Plex Mono', ui-monospace, monospace;
+  font-size: 0.85rem;
+  line-height: 1.5;
+  resize: vertical;
+  white-space: pre;
+  tab-size: 2;
+}
+
 @media (max-width: 960px) {
   .app-shell { grid-template-columns: 1fr; }
   .sidebar {

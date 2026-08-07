@@ -148,15 +148,20 @@ chown server-panel:server-panel /opt/server-panel/data/panel.db
 systemctl start server-panel
 ```
 
-## File Viewer
+## File Manager
 
-Unter **Files** im Panel (nur Lesen):
+Unter **Files** im Panel:
 
-- erlaubte Wurzeln: `/var/www`, `/opt/sites`, `/srv/www`, `/var/sftp`, `/var/log`
-- Ordner browsen, Textdateien/Logs ansehen, Bilder als Vorschau
-- Schutz vor Path Traversal und Symlink-Escape
-- sensible Dateien (`.env`, Keys, `panel.db`, …) blockiert
-- kein Schreiben/Löschen über den Viewer
+- gesamtes Dateisystem ab `/`
+- Ordner browsen, Dateien ansehen/bearbeiten/speichern
+- Dateien & Ordner erstellen, umbenennen, löschen
+- Shortcuts: `/`, `/var/www`, `/etc`, `/var/log`, …
+- Schreiben/Löschen nur für Rolle `admin` (`files.manage`)
+- Audit-Log für alle Mutationen
+- geschützt vor Löschung: `/`, `/etc`, `/usr`, `/var`, … (System-Mountpoints)
+- kein Schreiben in `/proc`, `/sys`, `/dev`
+
+Der Domain-Document-Root-Picker bleibt auf Webroots beschränkt.
 
 ## SFTP-Accounts
 

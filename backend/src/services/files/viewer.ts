@@ -2,19 +2,49 @@ import path from 'node:path';
 import { runHelper } from '../../utils/exec.js';
 import { AppError } from '../../utils/errors.js';
 
-export const FILE_VIEWER_ROOTS = [
+export const FILE_SHORTCUTS = [
+  '/',
   '/var/www',
   '/opt/sites',
   '/srv/www',
   '/var/sftp',
   '/var/log',
+  '/etc',
+  '/home',
+  '/opt',
+  '/tmp',
 ] as const;
 
-const BLOCKED_NAME_RE =
-  /(\.env($|\.)|^\.git$|id_rsa|id_ed25519|privkey\.pem|panel\.db|\.sqlite($|\-)|htpasswd|shadow)/i;
+/** Exact paths that must never be deleted. */
+export const PROTECTED_DELETE_PATHS = new Set([
+  '/',
+  '/bin',
+  '/boot',
+  '/dev',
+  '/etc',
+  '/home',
+  '/lib',
+  '/lib64',
+  '/lost+found',
+  '/media',
+  '/mnt',
+  '/opt',
+  '/proc',
+  '/root',
+  '/run',
+  '/sbin',
+  '/srv',
+  '/sys',
+  '/tmp',
+  '/usr',
+  '/var',
+]);
 
-const MAX_TEXT_BYTES = 512_000;
-const MAX_LIST_ENTRIES = 500;
+const VIRTUAL_WRITE_BLOCK_PREFIXES = ['/proc', '/sys', '/dev'];
+
+const MAX_TEXT_BYTES = 1_048_576;
+const MAX_WRITE_BYTES = 2_000_000;
+const MAX_LIST_ENTRIES = 1000;
 
 export interface FileEntry {
   name: string;
@@ -37,58 +67,56 @@ export interface FileContent {
   content: string | null;
   isText: boolean;
   isImage: boolean;
+  editable: boolean;
 }
 
-function isBlockedName(name: string): boolean {
-  return BLOCKED_NAME_RE.test(name);
-}
-
-export function assertViewerPath(inputPath: string): string {
+export function assertFsPath(inputPath: string): string {
   if (!inputPath || typeof inputPath !== 'string') {
     throw new AppError('INVALID_PATH', 'Ungültiger Pfad.', 400);
   }
-  if (inputPath.includes('\0') || inputPath.includes('\\')) {
+  if (inputPath.includes('\0')) {
     throw new AppError('INVALID_PATH', 'Ungültiger Pfad.', 400);
   }
 
-  // Normalize but keep absolute
   let normalized = path.posix.normalize(inputPath.replace(/\\/g, '/'));
   if (!normalized.startsWith('/')) {
     throw new AppError('INVALID_PATH', 'Pfad muss absolut sein.', 400);
   }
-  // Remove trailing slash except root-like
   if (normalized.length > 1 && normalized.endsWith('/')) {
     normalized = normalized.slice(0, -1);
   }
-
-  const allowed = FILE_VIEWER_ROOTS.some(
-    (root) => normalized === root || normalized.startsWith(`${root}/`),
-  );
-  if (!allowed) {
-    throw new AppError(
-      'PATH_NOT_ALLOWED',
-      `Pfad liegt außerhalb erlaubter Wurzeln: ${FILE_VIEWER_ROOTS.join(', ')}`,
-      403,
-    );
-  }
-
-  const base = path.posix.basename(normalized);
-  if (base !== '/' && isBlockedName(base)) {
-    throw new AppError('PATH_BLOCKED', 'Diese Datei ist aus Sicherheitsgründen gesperrt.', 403);
-  }
-
-  // Block hidden traversal segments already handled by normalize; block /../ leftovers
   if (normalized.split('/').includes('..')) {
     throw new AppError('INVALID_PATH', 'Pfadtraversal ist nicht erlaubt.', 400);
   }
-
+  if (normalized.length > 1024) {
+    throw new AppError('INVALID_PATH', 'Pfad ist zu lang.', 400);
+  }
   return normalized;
 }
 
+/** @deprecated use assertFsPath */
+export const assertViewerPath = assertFsPath;
+
+export function assertWritablePath(inputPath: string): string {
+  const target = assertFsPath(inputPath);
+  if (VIRTUAL_WRITE_BLOCK_PREFIXES.some((p) => target === p || target.startsWith(`${p}/`))) {
+    throw new AppError('PATH_NOT_WRITABLE', 'In /proc, /sys und /dev kann nicht geschrieben werden.', 403);
+  }
+  return target;
+}
+
+export function assertDeletablePath(inputPath: string): string {
+  const target = assertWritablePath(inputPath);
+  if (PROTECTED_DELETE_PATHS.has(target)) {
+    throw new AppError('PATH_PROTECTED', 'Dieser Systempfad ist vor Löschung geschützt.', 403);
+  }
+  return target;
+}
+
 export function listRoots() {
-  return FILE_VIEWER_ROOTS.map((root) => ({
+  return FILE_SHORTCUTS.map((root) => ({
     path: root,
-    label: root,
+    label: root === '/' ? '/ (Root)' : root,
   }));
 }
 
@@ -97,21 +125,18 @@ export async function listDirectory(rawPath: string): Promise<{
   parent: string | null;
   entries: FileEntry[];
 }> {
-  const target = assertViewerPath(rawPath);
+  const target = assertFsPath(rawPath || '/');
   const result = (await runHelper({
     action: 'files.list',
     path: target,
   })) as {
-    ok?: boolean;
     path?: string;
     parent?: string | null;
     entries?: FileEntry[];
-    error?: string;
   };
 
   const entries = (result.entries || [])
     .filter((e) => e.name && e.name !== '.' && e.name !== '..')
-    .filter((e) => !isBlockedName(e.name))
     .slice(0, MAX_LIST_ENTRIES)
     .sort((a, b) => {
       if (a.type === 'dir' && b.type !== 'dir') return -1;
@@ -121,14 +146,14 @@ export async function listDirectory(rawPath: string): Promise<{
 
   return {
     path: result.path || target,
-    parent: result.parent ?? parentPath(target),
+    parent: target === '/' ? null : result.parent ?? path.posix.dirname(target),
     entries,
   };
 }
 
 export async function readFileContent(rawPath: string): Promise<FileContent> {
-  const target = assertViewerPath(rawPath);
-  if (target === '/' || FILE_VIEWER_ROOTS.includes(target as (typeof FILE_VIEWER_ROOTS)[number])) {
+  const target = assertFsPath(rawPath);
+  if (target === '/') {
     throw new AppError('NOT_A_FILE', 'Verzeichnisse können nicht als Datei gelesen werden.', 400);
   }
 
@@ -136,7 +161,13 @@ export async function readFileContent(rawPath: string): Promise<FileContent> {
     action: 'files.read',
     path: target,
     maxBytes: MAX_TEXT_BYTES,
-  })) as FileContent & { ok?: boolean; error?: string };
+  })) as FileContent;
+
+  const editable =
+    Boolean(result.isText) &&
+    !VIRTUAL_WRITE_BLOCK_PREFIXES.some((p) => target === p || target.startsWith(`${p}/`)) &&
+    !result.truncated &&
+    result.size <= MAX_WRITE_BYTES;
 
   return {
     path: result.path || target,
@@ -149,16 +180,63 @@ export async function readFileContent(rawPath: string): Promise<FileContent> {
     content: result.content ?? null,
     isText: Boolean(result.isText),
     isImage: Boolean(result.isImage),
+    editable,
   };
 }
 
-function parentPath(p: string): string | null {
-  if (FILE_VIEWER_ROOTS.includes(p as (typeof FILE_VIEWER_ROOTS)[number])) return null;
-  const parent = path.posix.dirname(p);
-  try {
-    assertViewerPath(parent);
-    return parent;
-  } catch {
-    return null;
+export async function writeFileContent(rawPath: string, content: string): Promise<FileContent> {
+  const target = assertWritablePath(rawPath);
+  if (typeof content !== 'string') {
+    throw new AppError('VALIDATION_ERROR', 'Inhalt fehlt.', 400);
   }
+  const bytes = Buffer.byteLength(content, 'utf8');
+  if (bytes > MAX_WRITE_BYTES) {
+    throw new AppError('FILE_TOO_LARGE', `Datei darf maximal ${MAX_WRITE_BYTES} Bytes haben.`, 400);
+  }
+
+  await runHelper({
+    action: 'files.write',
+    path: target,
+    content,
+  });
+  return readFileContent(target);
+}
+
+export async function createFile(rawPath: string, content = ''): Promise<FileContent> {
+  const target = assertWritablePath(rawPath);
+  await runHelper({
+    action: 'files.create',
+    path: target,
+    content,
+  });
+  return readFileContent(target);
+}
+
+export async function createDirectory(rawPath: string): Promise<{ path: string }> {
+  const target = assertWritablePath(rawPath);
+  await runHelper({
+    action: 'files.mkdir',
+    path: target,
+  });
+  return { path: target };
+}
+
+export async function deletePath(rawPath: string, recursive = false): Promise<void> {
+  const target = assertDeletablePath(rawPath);
+  await runHelper({
+    action: 'files.delete',
+    path: target,
+    recursive: Boolean(recursive),
+  });
+}
+
+export async function renamePath(fromRaw: string, toRaw: string): Promise<{ path: string }> {
+  const from = assertDeletablePath(fromRaw);
+  const to = assertWritablePath(toRaw);
+  await runHelper({
+    action: 'files.rename',
+    from,
+    to,
+  });
+  return { path: to };
 }

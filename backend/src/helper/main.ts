@@ -178,37 +178,55 @@ function assertSftpHome(home: string, username: string): string {
   return normalized;
 }
 
-const FILE_VIEWER_ROOTS = ['/var/www', '/opt/sites', '/srv/www', '/var/sftp', '/var/log'];
-const BLOCKED_FILE_RE =
-  /(\.env($|\.)|^\.git$|id_rsa|id_ed25519|privkey\.pem|panel\.db|\.sqlite($|\-)|htpasswd|^shadow$)/i;
+const PROTECTED_DELETE_PATHS = new Set([
+  '/',
+  '/bin',
+  '/boot',
+  '/dev',
+  '/etc',
+  '/home',
+  '/lib',
+  '/lib64',
+  '/lost+found',
+  '/media',
+  '/mnt',
+  '/opt',
+  '/proc',
+  '/root',
+  '/run',
+  '/sbin',
+  '/srv',
+  '/sys',
+  '/tmp',
+  '/usr',
+  '/var',
+]);
 
-function assertViewerPath(input: unknown): string {
+function assertFsPath(input: unknown): string {
   if (typeof input !== 'string' || !input.startsWith('/') || input.includes('\0')) {
     fail('Ungültiger Pfad');
   }
-  const resolved = path.resolve(input);
-  const allowed = FILE_VIEWER_ROOTS.some(
-    (root) => resolved === root || resolved.startsWith(`${root}/`),
-  );
-  if (!allowed) fail('Pfad nicht erlaubt');
-  if (resolved.split(path.sep).includes('..')) fail('Pfadtraversal');
-  const base = path.basename(resolved);
-  if (base && BLOCKED_FILE_RE.test(base)) fail('Datei gesperrt');
-
-  // Ensure realpath stays inside allowed roots (blocks symlink escape)
-  let real = resolved;
-  try {
-    if (fs.existsSync(resolved)) {
-      real = fs.realpathSync(resolved);
-    }
-  } catch {
-    fail('Pfad nicht lesbar');
+  let resolved = path.resolve(input);
+  if (resolved.length > 1 && resolved.endsWith(path.sep)) {
+    resolved = resolved.slice(0, -1);
   }
-  const realAllowed = FILE_VIEWER_ROOTS.some(
-    (root) => real === root || real.startsWith(`${root}/`),
-  );
-  if (!realAllowed) fail('Symlink-Ziel außerhalb erlaubter Wurzeln');
+  if (resolved.split(path.sep).includes('..')) fail('Pfadtraversal');
+  if (resolved.length > 1024) fail('Pfad zu lang');
   return resolved;
+}
+
+function assertWritableFsPath(input: unknown): string {
+  const target = assertFsPath(input);
+  if (target === '/proc' || target.startsWith('/proc/') || target === '/sys' || target.startsWith('/sys/') || target === '/dev' || target.startsWith('/dev/')) {
+    fail('Pfad nicht beschreibbar');
+  }
+  return target;
+}
+
+function assertDeletableFsPath(input: unknown): string {
+  const target = assertWritableFsPath(input);
+  if (PROTECTED_DELETE_PATHS.has(target)) fail('Systempfad ist vor Löschung geschützt');
+  return target;
 }
 
 function detectMime(filePath: string, buf?: Buffer): string {
@@ -750,7 +768,7 @@ Match Group sftpreadonly
         ok();
       }
       case 'files.list': {
-        const target = assertViewerPath(payload.path);
+        const target = assertFsPath(payload.path || '/');
         let st: fs.Stats;
         try {
           st = fs.statSync(target);
@@ -759,10 +777,10 @@ Match Group sftpreadonly
         }
         if (!st.isDirectory()) fail('Kein Verzeichnis');
 
-        const names = fs.readdirSync(target).slice(0, 500);
+        const names = fs.readdirSync(target).slice(0, 1000);
         const entries = [];
         for (const name of names) {
-          if (name === '.' || name === '..' || BLOCKED_FILE_RE.test(name)) continue;
+          if (name === '.' || name === '..') continue;
           const full = path.join(target, name);
           try {
             const lst = fs.lstatSync(full);
@@ -792,18 +810,14 @@ Match Group sftpreadonly
           }
         }
 
-        const parent = path.dirname(target);
-        const parentAllowed = FILE_VIEWER_ROOTS.some(
-          (root) => parent === root || parent.startsWith(`${root}/`) || FILE_VIEWER_ROOTS.includes(parent),
-        );
         ok({
           path: target,
-          parent: FILE_VIEWER_ROOTS.includes(target) ? null : parentAllowed ? parent : null,
+          parent: target === '/' ? null : path.dirname(target),
           entries,
         });
       }
       case 'files.read': {
-        const target = assertViewerPath(payload.path);
+        const target = assertFsPath(payload.path);
         let st: fs.Stats;
         try {
           st = fs.statSync(target);
@@ -812,7 +826,7 @@ Match Group sftpreadonly
         }
         if (!st.isFile()) fail('Kein reguläres File');
 
-        const maxBytes = Math.min(Math.max(Number(payload.maxBytes) || 512_000, 1), 1_048_576);
+        const maxBytes = Math.min(Math.max(Number(payload.maxBytes) || 1_048_576, 1), 2_000_000);
         const fd = fs.openSync(target, 'r');
         try {
           const toRead = Math.min(st.size, maxBytes);
@@ -821,13 +835,16 @@ Match Group sftpreadonly
           const mime = detectMime(target, buf);
           const isImage = mime.startsWith('image/') && mime !== 'image/svg+xml';
           const isSvg = mime === 'image/svg+xml';
-          const textLike = mime.startsWith('text/') || ['application/json', 'application/xml'].includes(mime) || isSvg;
+          const textLike =
+            mime.startsWith('text/') ||
+            ['application/json', 'application/xml'].includes(mime) ||
+            isSvg ||
+            !buf.includes(0);
           const isText = textLike && isMostlyText(buf);
 
           let encoding: 'utf-8' | 'base64' | 'none' = 'none';
           let content: string | null = null;
           if (isImage) {
-            // only small images inline
             if (st.size <= 1_048_576) {
               const full = st.size <= maxBytes ? buf : fs.readFileSync(target);
               encoding = 'base64';
@@ -853,6 +870,58 @@ Match Group sftpreadonly
         } finally {
           fs.closeSync(fd);
         }
+      }
+      case 'files.write': {
+        const target = assertWritableFsPath(payload.path);
+        if (typeof payload.content !== 'string') fail('Inhalt fehlt');
+        if (Buffer.byteLength(payload.content, 'utf8') > 2_000_000) fail('Datei zu groß');
+        const parent = path.dirname(target);
+        if (!fs.existsSync(parent) || !fs.statSync(parent).isDirectory()) fail('Elternverzeichnis fehlt');
+        fs.writeFileSync(target, payload.content, { encoding: 'utf8', mode: 0o644 });
+        ok({ path: target, size: Buffer.byteLength(payload.content, 'utf8') });
+      }
+      case 'files.create': {
+        const target = assertWritableFsPath(payload.path);
+        if (fs.existsSync(target)) fail('Pfad existiert bereits');
+        const parent = path.dirname(target);
+        if (!fs.existsSync(parent) || !fs.statSync(parent).isDirectory()) fail('Elternverzeichnis fehlt');
+        const content = typeof payload.content === 'string' ? payload.content : '';
+        if (Buffer.byteLength(content, 'utf8') > 2_000_000) fail('Datei zu groß');
+        fs.writeFileSync(target, content, { encoding: 'utf8', mode: 0o644, flag: 'wx' });
+        ok({ path: target });
+      }
+      case 'files.mkdir': {
+        const target = assertWritableFsPath(payload.path);
+        if (fs.existsSync(target)) fail('Pfad existiert bereits');
+        fs.mkdirSync(target, { recursive: false, mode: 0o755 });
+        ok({ path: target });
+      }
+      case 'files.delete': {
+        const target = assertDeletableFsPath(payload.path);
+        if (!fs.existsSync(target)) fail('Pfad nicht gefunden');
+        const st = fs.lstatSync(target);
+        if (st.isDirectory()) {
+          if (!payload.recursive) {
+            const entries = fs.readdirSync(target);
+            if (entries.length) fail('Verzeichnis ist nicht leer (recursive erforderlich)');
+            fs.rmdirSync(target);
+          } else {
+            fs.rmSync(target, { recursive: true, force: false });
+          }
+        } else {
+          fs.unlinkSync(target);
+        }
+        ok({ path: target });
+      }
+      case 'files.rename': {
+        const from = assertDeletableFsPath(payload.from);
+        const to = assertWritableFsPath(payload.to);
+        if (!fs.existsSync(from)) fail('Quellpfad nicht gefunden');
+        if (fs.existsSync(to)) fail('Zielpfad existiert bereits');
+        const parent = path.dirname(to);
+        if (!fs.existsSync(parent) || !fs.statSync(parent).isDirectory()) fail('Ziel-Elternverzeichnis fehlt');
+        fs.renameSync(from, to);
+        ok({ path: to });
       }
       default:
         fail('Unbekannte Aktion');

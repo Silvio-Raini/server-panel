@@ -19,6 +19,7 @@ export type Permission =
   | 'sftp.read'
   | 'sftp.manage'
   | 'files.read'
+  | 'files.manage'
   | 'audit.read'
   | 'settings.manage';
 
@@ -41,6 +42,7 @@ const ROLE_PERMISSIONS: Record<Role, Permission[]> = {
     'sftp.read',
     'sftp.manage',
     'files.read',
+    'files.manage',
     'audit.read',
     'settings.manage',
   ],

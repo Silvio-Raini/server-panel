@@ -134,7 +134,12 @@ export type HelperAction =
   | { action: 'sftp.lock' | 'sftp.unlock'; username: string }
   | { action: 'sftp.delete'; username: string; home: string; removeData: boolean }
   | { action: 'files.list'; path: string }
-  | { action: 'files.read'; path: string; maxBytes?: number };
+  | { action: 'files.read'; path: string; maxBytes?: number }
+  | { action: 'files.write'; path: string; content: string }
+  | { action: 'files.create'; path: string; content?: string }
+  | { action: 'files.mkdir'; path: string }
+  | { action: 'files.delete'; path: string; recursive?: boolean }
+  | { action: 'files.rename'; from: string; to: string };
 
 /** Privileged operations via fixed helper binary + sudo (no shell). */
 export async function runHelper(payload: HelperAction, timeoutMs = 60_000): Promise<unknown> {
